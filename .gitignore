@@ -1,12 +1,15 @@
 # Python
 __pycache__
 
+# OS
+.DS_Store
+
 # Environment
 .env
 .venv
 
-# OS
-.DS_Store
+# Configuration
+config.yml
 
 # Screenshots
 screenshots/

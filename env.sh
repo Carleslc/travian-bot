@@ -6,8 +6,18 @@ if [ "$1" != "" ]; then
     env="$1"
 fi
 
+config="config.yml"
+
+if [ ! -f "$config" ]; then
+    cp "$config.template" "$config"
+
+    echo "$config created"
+fi
+
 if [ ! -f "$env" ]; then
     cp "$env.template" "$env"
+
+    echo "$env"
 
     echo "Please, fill the $env file"
 

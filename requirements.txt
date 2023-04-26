@@ -1,3 +1,4 @@
+pyyaml
 pyppeteer
 python-dotenv
 python-telegram-bot

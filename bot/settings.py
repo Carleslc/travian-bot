@@ -13,8 +13,8 @@ def set_logging(level=LOG_LEVEL):
     if level == logging.INFO:
         logging.getLogger("telegram.ext.dispatcher").setLevel(logging.WARN)
         logging.getLogger("apscheduler.scheduler").setLevel(logging.WARN)
-        logging.getLogger(
-            "apscheduler.executors.default").setLevel(logging.WARN)
+        logging.getLogger("apscheduler.executors.default").setLevel(logging.WARN)
+        logging.getLogger("pyppeteer.launcher").setLevel(logging.WARN)
 
     if level == logging.DEBUG:
         logging.getLogger("asyncio").setLevel(logging.INFO)
