@@ -1,0 +1,26 @@
+version: '3.9'
+
+networks:
+  web_network:
+    external: true
+
+services:
+  # Bot
+  travian-bot:
+    build: .
+    image: travian-bot:latest
+    container_name: travian-bot
+    restart: unless-stopped
+    volumes:
+      - ./bot:/usr/src/travian-bot
+    networks:
+      - web_network
+    ports:
+      - ${TELEGRAM_WEBHOOK_PORT}:${TELEGRAM_WEBHOOK_PORT}
+    environment:
+      TRAVIAN_SERVER_URL: $TRAVIAN_SERVER_URL
+      TRAVIAN_EMAIL: $TRAVIAN_EMAIL
+      TRAVIAN_PASSWORD: $TRAVIAN_PASSWORD
+      TELEGRAM_TOKEN: $TELEGRAM_TOKEN
+      TELEGRAM_WEBHOOK_URL: $TELEGRAM_WEBHOOK_URL
+      TELEGRAM_WEBHOOK_PORT: $TELEGRAM_WEBHOOK_PORT

@@ -1,0 +1,13 @@
+{
+  "python.analysis.extraPaths": [
+    "bot"
+  ],
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.python",
+    "editor.formatOnType": true,
+    "editor.formatOnSave": true,
+  },
+  "editor.rulers": [100],
+  "python.formatting.autopep8Args": ["--max-line-length", "100"],
+  "python.analysis.typeCheckingMode": "basic",
+}
