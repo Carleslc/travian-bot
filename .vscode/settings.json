@@ -10,4 +10,5 @@
   "editor.rulers": [100],
   "python.formatting.autopep8Args": ["--max-line-length", "100"],
   "python.analysis.typeCheckingMode": "basic",
+  "vue.features.codeActions.enable": false,
 }

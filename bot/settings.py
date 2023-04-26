@@ -8,7 +8,7 @@ def set_logging(level=LOG_LEVEL):
     LOG_LEVEL = level
 
     logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=level)
+        format='%(asctime)s  %(levelname)s\t[%(name)s]\t%(message)s', level=level)
 
     if level == logging.INFO:
         logging.getLogger("telegram.ext.dispatcher").setLevel(logging.WARN)

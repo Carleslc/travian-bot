@@ -27,7 +27,7 @@ DEFAULT_BROWSER_ARGS = ['--mute-audio']  # '--no-sandbox'
 
 class Browser:
 
-    def __init__(self, headless=False, headers={}):
+    def __init__(self, headless=True, headers={}):
         self.headless = headless
         self.__headers = headers
         self.__browser = None  # type: ignore (not connected yet)
@@ -50,17 +50,19 @@ class Browser:
 
     async def close(self):
         if self.is_connected:
+            self.__browser.remove_all_listeners()
+
             await self.__browser.close()
 
             logger.info('Browser Closed')
 
-    async def go(self, url: str, newTab=False, log=False) -> Page:
+    async def go(self, logger: logging.Logger, url: str, new_tab=False, log=False) -> Page:
         if not self.is_connected:
             raise ConnectionError('Browser is not connected')
 
-        logger.debug(f'Loading:\t{url}')
+        logger.debug(f'Loading:  {url}')
 
-        if newTab:
+        if new_tab:
             page = await self.__browser.newPage()
 
             await page.setUserAgent(USER_AGENT)
@@ -72,47 +74,47 @@ class Browser:
         if log:
             Browser.attach_console(page)
 
+        page.remove_all_listeners(Page.Events.Load)
+
         await page.goto(url)
 
-        logger.debug(f'Loaded:\t{page.url}')
+        logger.debug(f'Loaded:   {page.url}')
+
+        def loaded():
+            logger.debug(f'Navigate: {page.url}')
+
+        page.on(Page.Events.Load, loaded)
 
         return page
 
-    async def click(self, page: Page, clickTitle: str, clickSelector: str, **kwargs):
+    async def click(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, **kwargs):
         logger.debug(f'Click:\t{clickTitle}')
 
         await page.waitForSelector(clickSelector)
 
         return await page.click(clickSelector, **kwargs)
 
-    async def click_go(self, page: Page, clickTitle: str, clickSelector: str, timeout: int = 30000, **kwargs):
-        before_url = page.url
-
+    async def click_go(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, timeout: int = 30000, **kwargs):
         await asyncio.gather(
-            self.click(page, clickTitle, clickSelector, **kwargs),
+            self.click(logger, page, clickTitle, clickSelector, **kwargs),
             page.waitForNavigation(timeout=timeout)
         )
 
-        after_url = page.url
-
-        if before_url != after_url:
-            logger.debug(f'Navigation:\t{after_url}')
-
-    async def type(self, page: Page, inputTitle: str, inputSelector: str, inputContent: str, obfuscate: Optional[str] = None, **kwargs):
+    async def type(self, logger: logging.Logger, page: Page, inputTitle: str, inputSelector: str, inputContent: str, obfuscate: Optional[str] = None, **kwargs):
         logger.debug(f"Type:\t{inputTitle} -> {f'({obfuscate})' if obfuscate else inputContent}")
 
         await page.waitForSelector(inputSelector)
 
         await page.type(inputSelector, inputContent, **kwargs)
 
-    async def wait(self, page: Page, milliseconds: int, **kwargs):
+    async def wait(self, logger: logging.Logger, page: Page, milliseconds: int, **kwargs):
         logger.debug(f'Waiting for {milliseconds} ms')
 
         await page.waitFor(milliseconds, **kwargs)
 
-    async def screenshot(self, page: Page, filename: str, delay: int = 0, **kwargs):
+    async def screenshot(self, logger: logging.Logger, page: Page, filename: str, delay: int = 0, **kwargs):
         if delay:
-            await self.wait(page, delay)
+            await self.wait(logger, page, delay)
 
         logger.debug(f'Screenshot ({filename}): {page.url}')
 
@@ -125,19 +127,23 @@ class Browser:
     async def text_content(self, page: Page, element: 'ElementHandle'):
         return await page.evaluate('(element) => element.textContent', element)
 
+    def on(self, event: str, handler):
+        self.__browser.on(event, lambda *args: asyncio.ensure_future(handler(*args)))
+
+    @staticmethod
+    def on_page_async(page: Page, event: str, async_handler):
+        page.on(event, lambda *args: asyncio.ensure_future(async_handler(*args)))
+
     @staticmethod
     def attach_console(page: Page):
         async def log_console_message(msg: 'ConsoleMessage'):
             for arg in msg.args:
                 console_log(logger_console, msg.type, str(await arg.jsonValue()))
 
-        def console_handler(msg):
-            asyncio.ensure_future(log_console_message(msg))
-
-        page.on(Page.Events.Console, console_handler)
+        Browser.on_page_async(page, Page.Events.Console, log_console_message)
 
 
-async def start_browser(headless=False, width=1440, height=900, args: list[str] = DEFAULT_BROWSER_ARGS):
+async def start_browser(headless=True, width=1440, height=900, args: list[str] = DEFAULT_BROWSER_ARGS):
     browser = Browser(headless=headless)
     await browser.connect(width=width, height=height, args=args)
     return browser
