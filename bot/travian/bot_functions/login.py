@@ -38,6 +38,9 @@ class TravianBotLogin(TravianBotFunction):
             await TravianBotLogin(bot, page).run()
 
     async def run(self):
+        if not self.browser:
+            raise ConnectionError('Cannot login because browser is not connected')
+
         email, password = get_credentials()
 
         email_input = '#loginForm > tbody > tr.account > td:nth-child(2) > input'

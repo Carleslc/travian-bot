@@ -1,6 +1,5 @@
-import os.path
-
 import logging
+import os.path
 
 import asyncio
 
@@ -11,11 +10,15 @@ from settings import console_log
 from pyppeteer import launch
 from pyppeteer.page import Page
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TypeVar, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pyppeteer.page import ConsoleMessage, ElementHandle
-    from pyppeteer.browser import Browser as PyppeteerBrowser
+
+from pyppeteer.browser import Browser as PyppeteerBrowser
+
+BrowserEvent = TypeVar('BrowserEvent', str, type(PyppeteerBrowser.Events))
+PageEvent = TypeVar('PageEvent', str, type(Page.Events))
 
 logger = logging.getLogger(__name__)
 logger_console = logging.getLogger(__name__ + '.console')
@@ -27,49 +30,54 @@ DEFAULT_BROWSER_ARGS = ['--mute-audio']  # '--no-sandbox'
 
 class Browser:
 
-    def __init__(self, headless=True, headers={}):
+    def __init__(self, headless=True, headers={}, width=1920, height=1080, args: list[str] = DEFAULT_BROWSER_ARGS):
         self.headless = headless
-        self.__headers = headers
-        self.__browser = None  # type: ignore (not connected yet)
+        self.headers = headers
+        self.width = width
+        self.height = height
+        self.args = args
+        self.__browser: Optional[PyppeteerBrowser] = None
 
-    @property
-    def is_connected(self):
-        return self.__browser is not None
+        if not headless:
+            self.args.append(f'--window-size={width},{height}')
+            self.args.append('--start-maximized')  # --start-fullscreen
 
-    async def connect(self, width=1920, height=1080, args: list[str] = DEFAULT_BROWSER_ARGS):
-        if not self.headless:
-            args.append(f'--window-size={width},{height}')
-            args.append('--start-maximized')  # --start-fullscreen
+    async def connect(self) -> PyppeteerBrowser:
+        if self.__browser is None:
+            self.__browser = await launch(
+                headless=self.headless,
+                defaultViewport={'width': self.width, 'height': self.height},
+                args=self.args)
 
-        self.__browser: 'PyppeteerBrowser' = await launch(
-            headless=self.headless,
-            defaultViewport={'width': width, 'height': height},
-            args=args)
+            logger.debug('Connected')
 
-        logger.info('Browser Connected')
+            def disconnected():
+                logger.debug('Disconnected')
+                self.__browser = None
+
+            self.on(PyppeteerBrowser.Events.Disconnected, disconnected)
+
+        return self.__browser
 
     async def close(self):
-        if self.is_connected:
-            self.__browser.remove_all_listeners()
-
+        if self.__browser:
             await self.__browser.close()
 
-            logger.info('Browser Closed')
+            logger.debug('Closed')
 
     async def go(self, logger: logging.Logger, url: str, new_tab=False, log=False) -> Page:
-        if not self.is_connected:
-            raise ConnectionError('Browser is not connected')
+        browser = await self.connect()
 
         logger.debug(f'Loading:  {url}')
 
         if new_tab:
-            page = await self.__browser.newPage()
+            page = await browser.newPage()
 
             await page.setUserAgent(USER_AGENT)
 
-            await page.setExtraHTTPHeaders(self.__headers)
+            await page.setExtraHTTPHeaders(self.headers)
         else:
-            page = (await self.__browser.pages())[0]
+            page = (await browser.pages())[0]
 
         if log:
             Browser.attach_console(page)
@@ -116,7 +124,7 @@ class Browser:
         if delay:
             await self.wait(logger, page, delay)
 
-        logger.debug(f'Screenshot ({filename}): {page.url}')
+        logger.info(f'Screenshot ({filename}): {page.url}')
 
         screenshots_dir = Path('screenshots')
         screenshots_dir.mkdir(parents=True, exist_ok=True)
@@ -127,12 +135,20 @@ class Browser:
     async def text_content(self, page: Page, element: 'ElementHandle'):
         return await page.evaluate('(element) => element.textContent', element)
 
-    def on(self, event: str, handler):
-        self.__browser.on(event, lambda *args: asyncio.ensure_future(handler(*args)))
+    def on(self, event: 'BrowserEvent', handler):
+        if self.__browser:
+            self.__browser.on(event, handler)
+
+    def on_async(self, event: 'BrowserEvent', async_handler):
+        self.on(event, lambda *args: asyncio.ensure_future(async_handler(*args)))
 
     @staticmethod
-    def on_page_async(page: Page, event: str, async_handler):
-        page.on(event, lambda *args: asyncio.ensure_future(async_handler(*args)))
+    def on_page(page: Page, event: 'PageEvent', handler):
+        page.on(event, handler)
+
+    @staticmethod
+    def on_page_async(page: Page, event: 'PageEvent', async_handler):
+        Browser.on_page(page, event, lambda *args: asyncio.ensure_future(async_handler(*args)))
 
     @staticmethod
     def attach_console(page: Page):
@@ -143,7 +159,7 @@ class Browser:
         Browser.on_page_async(page, Page.Events.Console, log_console_message)
 
 
-async def start_browser(headless=True, width=1440, height=900, args: list[str] = DEFAULT_BROWSER_ARGS):
-    browser = Browser(headless=headless)
-    await browser.connect(width=width, height=height, args=args)
+async def start_browser(headless=True, width=1440, height=900, args: list[str] = DEFAULT_BROWSER_ARGS) -> Browser:
+    browser = Browser(headless=headless, width=width, height=height, args=args)
+    await browser.connect()
     return browser

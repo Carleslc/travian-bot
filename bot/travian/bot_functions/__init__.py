@@ -1,6 +1,6 @@
 from abc import abstractmethod
 
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from travian.bot import TravianBot
@@ -13,7 +13,7 @@ class TravianBotFunction:
         self.bot = bot
 
     @property
-    def browser(self) -> 'Browser':
+    def browser(self) -> Optional['Browser']:
         return self.bot.browser
 
     @property
@@ -23,3 +23,6 @@ class TravianBotFunction:
     @abstractmethod
     async def run(self):
         ...
+
+    def __repr__(self):
+        return self.__class__.__name__

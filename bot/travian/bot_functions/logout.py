@@ -10,7 +10,7 @@ class TravianBotLogout(TravianBotFunction):
     LOGOUT_URL = 'logout'
 
     async def run(self):
-        if self.browser and self.browser.is_connected:
+        if self.browser:
             logout_page = await self.go_to_server_url(logger, TravianBotLogout.LOGOUT_URL, log=False)
 
             await self.browser.wait(logger, logout_page, 1000)

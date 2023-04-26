@@ -18,4 +18,7 @@ class TravianBotScreenshot(TravianBotFunction):
         await self.screenshot(page, delay=2000)
 
     async def screenshot(self, page: 'Page', delay: int = 0):
+        if not self.browser:
+            raise ConnectionError('Cannot screenshot because browser is not connected')
+
         await self.browser.screenshot(logger, page, 'screenshot.png', delay=delay)
