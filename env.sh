@@ -7,9 +7,10 @@ if [ "$1" != "" ]; then
 fi
 
 config="config.yml"
+config_template="config.template.yml"
 
 if [ ! -f "$config" ]; then
-    cp "$config.template" "$config"
+    cp "$config_template" "$config"
 
     echo "$config created"
 fi
