@@ -7,8 +7,8 @@
     "editor.formatOnType": true,
     "editor.formatOnSave": true,
   },
-  "editor.rulers": [100],
-  "python.formatting.autopep8Args": ["--max-line-length", "100"],
+  "editor.rulers": [120],
+  "python.formatting.autopep8Args": ["--max-line-length", "120"],
   "python.analysis.typeCheckingMode": "basic",
   "vue.features.codeActions.enable": false,
 }
