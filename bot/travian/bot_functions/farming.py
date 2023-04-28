@@ -19,10 +19,8 @@ class TravianBotFarmingList(TravianBotFunction):
         if not self.browser:
             raise ConnectionError('Cannot farm list because browser is not connected')
 
-        logger.debug('FARMING MOCK')
-
-        # raid_all_button = '#raidList > div.startAllWrapper > div.startAllButtons > button.startAll'
-        # await self.browser.click(logger, page, 'Raid All', raid_all_button)
+        raid_all_button = '#raidList > div.startAllWrapper > div.startAllButtons > button.startAll'
+        await self.browser.click(logger, page, 'Raid All', raid_all_button)
 
         self.update_data(self.__set_last_farming)
 
