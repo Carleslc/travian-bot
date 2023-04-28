@@ -1,53 +1,66 @@
-import logging
 import os.path
 
 import asyncio
 
 from pathlib import Path
+from subprocess import Popen
 
 from settings import console_log
 
 from pyppeteer import launch
 from pyppeteer.page import Page
+from pyppeteer.errors import PyppeteerError, PageError
+from pyppeteer.browser import Browser as PyppeteerBrowser
 
-from typing import Optional, TypeVar, TYPE_CHECKING
+from typing import Optional, TypeVar, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from pyppeteer.page import ConsoleMessage, ElementHandle
 
-from pyppeteer.browser import Browser as PyppeteerBrowser
-
-BrowserEvent = TypeVar('BrowserEvent', str, type(PyppeteerBrowser.Events))
-PageEvent = TypeVar('PageEvent', str, type(Page.Events))
+import logging
 
 logger = logging.getLogger(__name__)
 logger_console = logging.getLogger(__name__ + '.console')
 
+BrowserEvent = TypeVar('BrowserEvent', str, type(PyppeteerBrowser.Events))
+PageEvent = TypeVar('PageEvent', str, type(Page.Events))
+
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36'
 
-DEFAULT_BROWSER_ARGS = ['--mute-audio']  # '--no-sandbox'
+DEFAULT_BROWSER_ARGS = ['--mute-audio']  # '--no-sandbox', '--disable-site-isolation-trials'
 
 
 class Browser:
 
-    def __init__(self, headless=True, headers={}, width=1920, height=1080, args: list[str] = DEFAULT_BROWSER_ARGS):
+    def __init__(self, headless=True, headers={}, width=1920, height=1080,
+                 args: list[str] = DEFAULT_BROWSER_ARGS, event_loop: Optional[asyncio.AbstractEventLoop] = None):
         self.headless = headless
         self.headers = headers
         self.width = width
         self.height = height
         self.args = args
         self.__browser: Optional[PyppeteerBrowser] = None
+        self.__event_loop = event_loop
 
         if not headless:
             self.args.append(f'--window-size={width},{height}')
             self.args.append('--start-maximized')  # --start-fullscreen
 
+    @property
+    def is_connected(self):
+        return self.__browser is not None
+
     async def connect(self) -> PyppeteerBrowser:
         if self.__browser is None:
+            logger.debug('Connecting...')
+
             self.__browser = await launch(
                 headless=self.headless,
                 defaultViewport={'width': self.width, 'height': self.height},
-                args=self.args)
+                args=self.args,
+                handleSIGINT=False,
+                handleSIGTERM=False,
+                loop=self.__event_loop or asyncio.get_event_loop())
 
             logger.debug('Connected')
 
@@ -61,14 +74,22 @@ class Browser:
 
     async def close(self):
         if self.__browser:
+            logger.debug('Closing browser...')
+
+            cast(Popen, self.__browser.process).terminate()
+
             await self.__browser.close()
 
             logger.debug('Closed')
 
-    async def go(self, logger: logging.Logger, url: str, new_tab=False, log=False) -> Page:
+    async def go(self, logger: logging.Logger, url: str, new_tab=False, log=False, retry_seconds: Optional[int] = 2) -> Page:
         browser = await self.connect()
 
         logger.debug(f'Loading:  {url}')
+
+        pages = await browser.pages()
+
+        new_tab = new_tab or not pages
 
         if new_tab:
             page = await browser.newPage()
@@ -77,14 +98,30 @@ class Browser:
 
             await page.setExtraHTTPHeaders(self.headers)
         else:
-            page = (await browser.pages())[0]
+            page = pages[0]
 
         if log:
             Browser.attach_console(page)
 
         page.remove_all_listeners(Page.Events.Load)
 
-        await page.goto(url)
+        try:
+            await page.goto(url)
+        except PyppeteerError as e:
+            error_msg = f'[{e.__class__.__name__}] {e}'
+            if retry_seconds is not None:
+                if retry_seconds > 0:
+                    error_msg += f' >>> Retrying in {retry_seconds} seconds...'
+                elif retry_seconds == 0:
+                    error_msg += f' >>> Retrying...'
+                else:
+                    retry_seconds = None
+            logger.warning(error_msg)
+            if retry_seconds is not None and retry_seconds > 0:
+                await asyncio.sleep(retry_seconds)
+            if retry_seconds is not None:
+                return await self.go(logger, url, new_tab, log, retry_seconds)
+            raise e
 
         logger.debug(f'Loaded:   {page.url}')
 
@@ -93,12 +130,18 @@ class Browser:
 
         page.on(Page.Events.Load, loaded)
 
+        def page_error(e):
+            logger.warning(f'Page error: {page.url} [{e}]')
+            raise PageError(e)
+
+        page.on(Page.Events.PageError, page_error)
+
         return page
 
     async def click(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, **kwargs):
-        logger.debug(f'Click:\t{clickTitle}')
-
         await page.waitForSelector(clickSelector)
+
+        logger.debug(f'Click:\t{clickTitle}')
 
         return await page.click(clickSelector, **kwargs)
 
@@ -120,17 +163,24 @@ class Browser:
 
         await page.waitFor(milliseconds, **kwargs)
 
-    async def screenshot(self, logger: logging.Logger, page: Page, filename: str, delay: int = 0, **kwargs):
-        if delay:
-            await self.wait(logger, page, delay)
+    async def screenshot(self, logger: logging.Logger, page: Page, filepath: str, delay_ms: int = 0, **kwargs):
+        if delay_ms:
+            await self.wait(logger, page, delay_ms)
 
-        logger.info(f'Screenshot ({filename}): {page.url}')
+        logger.info(f'Screenshot ({filepath}): {page.url}')
 
         screenshots_dir = Path('screenshots')
         screenshots_dir.mkdir(parents=True, exist_ok=True)
-        screenshot_path = os.path.join(screenshots_dir, filename)
+        screenshot_path = os.path.join(screenshots_dir, filepath)
 
         return await page.screenshot(path=screenshot_path, type='png', fullPage=True, **kwargs)
+
+    async def close_page(self, logger: logging.Logger, page: 'Page', delay_seconds: int = 0):
+        if self.__browser:
+            await self.wait(logger, page, delay_seconds * 1000)
+
+            if len(await self.__browser.pages()) > 1:
+                await page.close()
 
     async def text_content(self, page: Page, element: 'ElementHandle'):
         return await page.evaluate('(element) => element.textContent', element)
@@ -159,7 +209,8 @@ class Browser:
         Browser.on_page_async(page, Page.Events.Console, log_console_message)
 
 
-async def start_browser(headless=True, width=1440, height=900, args: list[str] = DEFAULT_BROWSER_ARGS) -> Browser:
-    browser = Browser(headless=headless, width=width, height=height, args=args)
+async def start_browser(headless=True, width=1440, height=900, args: list[str] = DEFAULT_BROWSER_ARGS, event_loop: Optional[asyncio.AbstractEventLoop] = None) -> Browser:
+    browser = Browser(headless=headless, width=width, height=height,
+                      args=args, event_loop=event_loop)
     await browser.connect()
     return browser

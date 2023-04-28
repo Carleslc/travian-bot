@@ -1,6 +1,8 @@
 from abc import abstractmethod
 
-from typing import Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
+
+from travian.data import Data
 
 if TYPE_CHECKING:
     from travian.bot import TravianBot
@@ -17,12 +19,27 @@ class TravianBotFunction:
         return self.bot.browser
 
     @property
+    def browser_is_connected(self) -> bool:
+        return self.bot.browser_is_connected
+
+    @property
     def go_to_server_url(self):
         return self.bot.go_to_server_url
+
+    @property
+    def new_tab(self) -> bool:
+        return self.bot.scheduler.running_tasks > 1
 
     @abstractmethod
     async def run(self):
         ...
+
+    async def schedule(self):
+        await self.bot.scheduler.append(self)
+
+    def update_data(self, update: Callable[[Data], None]):
+        update(self.bot.data)
+        self.bot._event_loop.run_in_executor(None, self.bot.data.save)
 
     def __repr__(self):
         return self.__class__.__name__

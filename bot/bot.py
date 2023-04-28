@@ -7,6 +7,7 @@ import logging
 from settings import set_logging, load_environment
 
 from travian.bot import start_travian_bot
+from travian.errors import run_handle_interrupt
 
 if __name__ == '__main__':
     load_environment()
@@ -17,6 +18,6 @@ if __name__ == '__main__':
 
     logging.info("Starting bot...")
 
-    start_travian_bot()
+    run_handle_interrupt(start_travian_bot)
 
     logging.info("Goodbye!")

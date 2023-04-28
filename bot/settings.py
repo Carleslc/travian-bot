@@ -2,13 +2,15 @@ import logging
 
 LOG_LEVEL = logging.WARN
 
+DATE_TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+
 
 def set_logging(level=LOG_LEVEL):
     global LOG_LEVEL
     LOG_LEVEL = level
 
     logging.basicConfig(
-        format='%(asctime)s  %(levelname)s\t[%(name)s]\t%(message)s', level=level)
+        format='%(asctime)s  %(levelname)s\t[%(name)s]  %(message)s', level=level)
 
     if level == logging.INFO:
         logging.getLogger("telegram.ext.dispatcher").setLevel(logging.WARN)
