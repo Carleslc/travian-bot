@@ -102,11 +102,9 @@ class Browser:
 
         logger.debug(f'Loading:  {url}')
 
-        pages = await browser.pages()
+        page = await self.get_current_page() if not new_tab else None
 
-        new_tab = new_tab or not pages
-
-        if new_tab:
+        if not page:
             page = await browser.newPage()
 
             await page.setUserAgent(USER_AGENT)
@@ -114,8 +112,6 @@ class Browser:
             await page.setExtraHTTPHeaders(self.headers)
 
             await stealth(page)
-        else:
-            page = pages[0]
 
         if log:
             Browser.attach_console(page)
@@ -154,6 +150,23 @@ class Browser:
             logger.debug(f'Navigate: {page.url}')
 
         page.on(Page.Events.Load, loaded)
+
+        return page
+
+    async def get_current_page(self) -> Optional[Page]:
+        page = None
+        if self.__browser:
+            try:
+                page = (await self.__browser.pages())[0]
+            except:
+                pass
+        return page
+
+    async def get_current_page_or_go(self, logger: logging.Logger, url: str, **kwargs) -> Page:
+        page = await self.get_current_page()
+
+        if not page:
+            page = await self.go(logger, url, **kwargs)
 
         return page
 

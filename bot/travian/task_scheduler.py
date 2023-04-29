@@ -102,8 +102,18 @@ class FunctionTask:
         await self.function.run()
 
     @property
-    def is_cancelled(self):
+    def is_running(self) -> bool:
+        return self._status == TaskStatus.Running
+
+    @property
+    def is_cancelled(self) -> bool:
         return self._status == TaskStatus.Cancelled
+
+    @property
+    def is_finished(self) -> bool:
+        return self._status == TaskStatus.Completed \
+            or self._status == TaskStatus.Cancelled \
+            or self._status == TaskStatus.Failed
 
     def cancel(self):
         if self._cancellable_task and not self._cancellable_task.cancelled():
@@ -123,12 +133,6 @@ class FunctionTask:
             queue = self.from_schedule
             self.from_schedule = None
             queue.task_done()
-
-    @property
-    def is_finished(self):
-        return self._status == TaskStatus.Completed \
-            or self._status == TaskStatus.Cancelled \
-            or self._status == TaskStatus.Failed
 
     def __str__(self):
         return f'{self.function} ({self.status})'
@@ -358,8 +362,12 @@ class TaskScheduler:
             logger.debug('All isolated tasks finished')
 
     @property
-    def running_tasks(self):
-        return len(self._running_tasks)
+    def running_tasks(self) -> set[FunctionTask]:
+        return self._running_tasks
+
+    @property
+    def active_tasks(self) -> set[FunctionTask]:
+        return {running_task for running_task in self.running_tasks if running_task.is_running}
 
     def __len__(self):
         return self._queue.qsize() + self._failed_queue.qsize()  # scheduled tasks

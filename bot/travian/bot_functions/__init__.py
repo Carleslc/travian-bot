@@ -27,8 +27,12 @@ class TravianBotFunction:
         return self.bot.go_to_server_url
 
     @property
+    def get_current_page_or_go_to_server_url(self):
+        return self.bot.get_current_page_or_go_to_server_url
+
+    @property
     def new_tab(self) -> bool:
-        return self.bot.scheduler.running_tasks > 1
+        return len(self.bot.scheduler.active_tasks) > 1
 
     @abstractmethod
     async def run(self):

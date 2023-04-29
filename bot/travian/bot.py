@@ -127,10 +127,18 @@ class TravianBot:
 
     async def go_to_server_url(self, logger: logging.Logger, page_url: str = '',
                                check_login=True, new_tab=False, log=True, retry_seconds: Optional[int] = 2) -> 'Page':
+        return await self.__get_server_page(Browser.go, logger, page_url, check_login, new_tab, log, retry_seconds)
+
+    async def get_current_page_or_go_to_server_url(self, logger: logging.Logger, page_url: str = '',
+                                                   check_login=True, new_tab=False, log=True, retry_seconds: Optional[int] = 2) -> 'Page':
+        return await self.__get_server_page(Browser.get_current_page_or_go, logger, page_url, check_login, new_tab, log, retry_seconds)
+
+    async def __get_server_page(self, get_page_or_go, logger: logging.Logger, page_url: str,
+                                check_login: bool, new_tab: bool, log: bool, retry_seconds: Optional[int]) -> 'Page':
         browser = await self.connect()
 
         url = self.get_server_url(page_url)
-        page = await browser.go(logger, url, new_tab=new_tab, log=log, retry_seconds=retry_seconds)
+        page = await get_page_or_go(browser, logger, url, new_tab=new_tab, log=log, retry_seconds=retry_seconds)
 
         if check_login:
             await TravianBotLogin.check_logged_in(self, page)
