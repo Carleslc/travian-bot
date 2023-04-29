@@ -1,4 +1,5 @@
 pyyaml
 pyppeteer
-python-dotenv
+pyppeteer_stealth
 python-telegram-bot
+python-dotenv
