@@ -32,13 +32,14 @@ TaskStatus = SimpleNamespace(
 
 class FunctionTask:
 
-    def __init__(self, function: TravianBotFunction, run_async=False, reschedule_on_error=True):
+    def __init__(self, function: TravianBotFunction, scheduler: 'TaskScheduler', run_async=False, reschedule_on_error=True):
         self.function = function
         self._run_async = run_async
         self._status = TaskStatus.Created
-        self.cancellable_task: Optional[asyncio.Future] = None
+        self._cancellable_task: Optional[asyncio.Future] = None
         self.reschedule_on_error = reschedule_on_error
-        self.from_schedule = False
+        self._scheduler = scheduler
+        self.__from_schedule: Optional[asyncio.Queue['FunctionTask']] = None
         self.exception = None
 
     @property
@@ -60,23 +61,42 @@ class FunctionTask:
             logger.info(self)
 
     @property
+    def from_schedule(self) -> Optional[asyncio.Queue['FunctionTask']]:
+        return self.__from_schedule
+
+    @from_schedule.setter
+    def from_schedule(self, queue: Optional[asyncio.Queue['FunctionTask']]):
+        if queue and self.__from_schedule:
+            raise ValueError(f'{self} already scheduled')
+
+        self.__from_schedule = queue
+
+        if self.__from_schedule:
+            self.status = TaskStatus.Scheduled
+
+    @property
     def is_asynchronous(self) -> bool:
         return self._run_async
 
     async def run(self):
         if self.is_cancelled:
-            raise ValueError(f'{self.function} is cancelled')
+            raise asyncio.CancelledError(f'{self.function} is cancelled')
 
         self.status = TaskStatus.Running
 
         try:
-            await self._run()
+            self._cancellable_task = asyncio.ensure_future(self._run(), loop=self._scheduler._event_loop)
+            await self._cancellable_task
+            self._finish(TaskStatus.Completed)
+        except asyncio.CancelledError:
+            self._finish(TaskStatus.Cancelled)
+        except (PyppeteerError, TimeoutError) as e:
+            self._failed(e)
+            if self.reschedule_on_error:
+                await self._scheduler._retry(self)
         except Exception as e:
-            self.exception = e
-            self.status = TaskStatus.Failed
-            raise self.exception
-
-        self.status = TaskStatus.Completed
+            self._failed(e)
+            raise e
 
     async def _run(self):
         await self.function.run()
@@ -86,11 +106,23 @@ class FunctionTask:
         return self._status == TaskStatus.Cancelled
 
     def cancel(self):
-        self.status = TaskStatus.Cancelled
+        if self._cancellable_task and not self._cancellable_task.cancelled():
+            self._cancellable_task.cancel()
+            self._cancellable_task = None
 
-        if self.cancellable_task and not self.cancellable_task.cancelled():
-            self.cancellable_task.cancel()
-            self.cancellable_task = None
+        self._finish(TaskStatus.Cancelled)
+
+    def _failed(self, e: Exception):
+        self.exception = e
+        self._finish(TaskStatus.Failed)
+
+    def _finish(self, status: str):
+        self.status = status
+
+        if self.is_finished and self.from_schedule:
+            queue = self.from_schedule
+            self.from_schedule = None
+            queue.task_done()
 
     @property
     def is_finished(self):
@@ -104,8 +136,8 @@ class FunctionTask:
 
 class PeriodicTask(FunctionTask):
 
-    def __init__(self, function: TravianBotFunction, interval_seconds: int, reschedule_on_error=False):
-        super().__init__(function, run_async=True, reschedule_on_error=reschedule_on_error)
+    def __init__(self, function: TravianBotFunction, scheduler: 'TaskScheduler', interval_seconds: int, reschedule_on_error=False):
+        super().__init__(function, scheduler, run_async=True, reschedule_on_error=reschedule_on_error)
 
         if interval_seconds is None or type(interval_seconds) is not int or interval_seconds <= 0:
             raise ValueError(f'Invalid interval for {function}')
@@ -116,11 +148,11 @@ class PeriodicTask(FunctionTask):
 
     async def run(self):
         while not self.is_cancelled:
-            self.cancellable_task = asyncio.ensure_future(super().run())
+            self._cancellable_task = asyncio.ensure_future(super().run())
             self._sleep_task = asyncio.ensure_future(asyncio.sleep(self.interval_seconds))
 
             await asyncio.gather(
-                self.cancellable_task,
+                self._cancellable_task,
                 self._sleep_task,
             )
 
@@ -129,10 +161,6 @@ class PeriodicTask(FunctionTask):
 
         if self._sleep_task:
             self._sleep_task.cancel()
-
-    @property
-    def is_finished(self):
-        return self.is_cancelled
 
     def _on_new_status(self):
         super()._on_new_status()
@@ -154,8 +182,7 @@ class PeriodicTask(FunctionTask):
 class ScheduleTask(FunctionTask):
 
     def __init__(self, scheduler: 'TaskScheduler', task: FunctionTask, at: datetime, priority: bool = False):
-        super().__init__(task.function, run_async=True)
-        self.scheduler = scheduler
+        super().__init__(task.function, scheduler, run_async=True)
         self.priority = priority
         self._task = task
         self.at = at
@@ -164,9 +191,9 @@ class ScheduleTask(FunctionTask):
         await self._wait_schedule()
 
         if self.priority:
-            await self.scheduler._run(self._task)
+            await self._scheduler._run(self._task)
         else:
-            await self.scheduler._append(self._task)
+            await self._scheduler._append(self._task)
 
     async def _wait_schedule(self):
         now = datetime.now()
@@ -184,10 +211,6 @@ class ScheduleTask(FunctionTask):
         super().cancel()
         self._task.cancel()
 
-    @property
-    def is_finished(self):
-        return self._task.is_finished
-
     def _log_schedule(self):
         aprox = '~' if not self.priority else ''
         logger.info(f'{self.function} ({TaskStatus.Scheduled}) will run at {aprox}{self.at.strftime(DATE_TIME_FORMAT)}')
@@ -202,6 +225,7 @@ class TaskScheduler:
     def __init__(self, bot: 'TravianBot'):
         self._bot = bot
         self._queue: asyncio.Queue[FunctionTask] = asyncio.Queue()
+        self._failed_queue: asyncio.Queue[FunctionTask] = asyncio.Queue()
         self._running_tasks: set[FunctionTask] = set()
         self._waiting: Optional[asyncio.Future] = None
 
@@ -211,23 +235,26 @@ class TaskScheduler:
 
     async def append(self, function: TravianBotFunction,
                      interval_seconds: Optional[int] = None, reschedule_on_error: Optional[bool] = None):
-        await self._append(wrap_task(function, interval_seconds, reschedule_on_error))
+        await self._append(self.wrap_task(function, interval_seconds, reschedule_on_error))
 
     async def schedule(self, function: TravianBotFunction, at: datetime, priority: bool = False,
                        interval_seconds: Optional[int] = None, reschedule_on_error: Optional[bool] = None):
-        function_task = wrap_task(function, interval_seconds, reschedule_on_error)
+        function_task = self.wrap_task(function, interval_seconds, reschedule_on_error)
         await self._append(ScheduleTask.wrap_schedule_task(self, function_task, at, priority))
 
-    async def _append(self, function_task: FunctionTask):
+    async def _append(self, function_task: FunctionTask, queue: Optional[asyncio.Queue[FunctionTask]] = None):
         if not function_task.is_cancelled and not self._bot.is_stopping:
-            await self._queue.put(function_task)
-            function_task.from_schedule = True
-            function_task.status = TaskStatus.Scheduled
+            queue = queue or self._queue
+            await queue.put(function_task)
+            function_task.from_schedule = queue
             await self.__check_queue()
+
+    async def _retry(self, function_task: FunctionTask):
+        await self._append(function_task, self._failed_queue)
 
     async def run(self, function: TravianBotFunction,
                   interval_seconds: Optional[int] = None, reschedule_on_error: Optional[bool] = None):
-        await self._run(wrap_task(function, interval_seconds, reschedule_on_error))
+        await self._run(self.wrap_task(function, interval_seconds, reschedule_on_error))
 
     async def _run(self, function_task: FunctionTask):
         running_task = self.__run_task(function_task)
@@ -235,37 +262,24 @@ class TaskScheduler:
         try:
             if not function_task.is_asynchronous:
                 await running_task
-        except asyncio.exceptions.CancelledError:
+        except asyncio.CancelledError:
             function_task.cancel()
+            running_task.cancel()
 
-    def __run_task(self, function_task: FunctionTask) -> asyncio.Future:
+    def __run_task(self, function_task: FunctionTask) -> asyncio.Task:
         self._running_tasks.add(function_task)
 
-        function_task.cancellable_task = self._event_loop.create_task(
-            self.__run_async(function_task)
-        )
+        task = self._event_loop.create_task(function_task.run())
 
-        function_task.cancellable_task.add_done_callback(
-            lambda _: self.__finish_task(function_task)
-        )
+        def finish_task(_: asyncio.Task):
+            if function_task.status == TaskStatus.Running:
+                raise ValueError('Finished task when still running')
 
-        return function_task.cancellable_task
+            self._running_tasks.remove(function_task)
 
-    async def __run_async(self, function_task: FunctionTask):
-        try:
-            await function_task.run()
-        except (PyppeteerError, TimeoutError):
-            if function_task.reschedule_on_error:
-                await self._append(function_task)
+        task.add_done_callback(finish_task)
 
-    def __finish_task(self, function_task: FunctionTask):
-        if function_task.status == TaskStatus.Running:
-            raise ValueError('Finished task when still running')
-
-        self._running_tasks.remove(function_task)
-
-        if function_task.from_schedule:
-            self._queue.task_done()
+        return task
 
     async def loop(self):
         await self.wait_for_running_tasks()
@@ -277,8 +291,9 @@ class TaskScheduler:
         logger.debug(f'Loop finished')
 
     async def __loop(self):
-        while not self._queue.empty():
-            function_task = self._queue.get_nowait()
+        while len(self) > 0:
+            queue = self._failed_queue if not self._failed_queue.empty() else self._queue
+            function_task = queue.get_nowait()
             await self._run(function_task)
 
         await self.wait_for_running_tasks()
@@ -288,7 +303,8 @@ class TaskScheduler:
             await self.__loop()  # restart loop after new tasks are scheduled
 
     async def clear(self, cancel_running_tasks=False):
-        self.__clear_queue()
+        self.__clear_queue(self._failed_queue)
+        self.__clear_queue(self._queue)
 
         if cancel_running_tasks:
             running_tasks = self._running_tasks.copy()
@@ -298,10 +314,10 @@ class TaskScheduler:
 
         await self.wait_for_running_tasks()
 
-    def __clear_queue(self):
-        while not self._queue.empty():
-            function_task = self._queue.get_nowait()
-            self._queue.task_done()  # skip running this task
+    def __clear_queue(self, queue: asyncio.Queue[FunctionTask]):
+        while not queue.empty():
+            function_task = queue.get_nowait()
+            queue.task_done()  # skip running this task
             logger.debug(f'Skip {function_task}')
 
     @property
@@ -318,11 +334,12 @@ class TaskScheduler:
     async def __wait_for_running_tasks(self):
         logger.debug('Waiting for running tasks...')
         # wait to finish scheduled tasks
+        await self._failed_queue.join()
         await self._queue.join()
         logger.debug('All scheduled tasks finished')
 
         def running_tasks_async():
-            return [running_task.cancellable_task for running_task in self._running_tasks if running_task.cancellable_task is not None and not running_task.is_cancelled]
+            return [running_task._cancellable_task for running_task in self._running_tasks if running_task._cancellable_task]
 
         running_tasks = running_tasks_async()
 
@@ -345,10 +362,9 @@ class TaskScheduler:
         return len(self._running_tasks)
 
     def __len__(self):
-        return self._queue.qsize()  # scheduled tasks
+        return self._queue.qsize() + self._failed_queue.qsize()  # scheduled tasks
 
-
-def wrap_task(function: TravianBotFunction, interval_seconds: Optional[int] = None, reschedule_on_error: Optional[bool] = None) -> FunctionTask:
-    if interval_seconds is not None:
-        return PeriodicTask(function, interval_seconds, reschedule_on_error=reschedule_on_error or False)
-    return FunctionTask(function, reschedule_on_error=True if reschedule_on_error is None else reschedule_on_error)
+    def wrap_task(self, function: TravianBotFunction, interval_seconds: Optional[int] = None, reschedule_on_error: Optional[bool] = None) -> FunctionTask:
+        if interval_seconds is not None:
+            return PeriodicTask(function, self, interval_seconds=interval_seconds, reschedule_on_error=reschedule_on_error or False)
+        return FunctionTask(function, self, reschedule_on_error=True if reschedule_on_error is None else reschedule_on_error)

@@ -13,6 +13,7 @@ from travian.bot_functions.login import TravianBotLogin
 from travian.bot_functions.logout import TravianBotLogout
 from travian.bot_functions.screenshot import TravianBotScreenshot
 from travian.bot_functions.farming import TravianBotFarmingList
+from travian.bot_functions.example import TravianBotExampleFunction
 
 from pyppeteer.browser import Browser as PyppeteerBrowser
 
@@ -32,8 +33,8 @@ class TravianBot:
 
     def __init__(self, server_url: str, event_loop: Optional[asyncio.AbstractEventLoop] = None):
         self.server_url = build_server_url(server_url)
-        self.config: Config = Config()
-        self.data: Data = Data()
+        self.config = Config()
+        self.data = Data()
         self.browser: Optional[Browser] = None
         self._stop_task: Optional[asyncio.Task] = None
         self.__event_loop = event_loop
@@ -54,12 +55,16 @@ class TravianBot:
         await TravianBotScreenshot(self, 'start').schedule()
 
         if self.config.farming_list.is_enabled:
+            logger.debug('TravianBotFarmingList is_enabled')
             await TravianBotFarmingList(self).schedule()
 
         # await TravianBotLogout(self).schedule()
 
     async def loop(self):
         await self.scheduler.loop()
+
+        if self.is_stopping:
+            await self.stop()
 
     async def connect(self) -> 'Browser':
         if not self.browser or not self.browser.is_connected:
@@ -103,19 +108,39 @@ class TravianBot:
             if self.browser_is_connected:
                 await self.browser.close()
 
+        self.data.save()
+
         logger.info('Stopped')
+
+    def kill(self):
+        logger.warning('KILL')
+
+        if self.browser:
+            self.browser.terminate()
+            self.browser = None
+
+        self.data.save()
+
+        self._event_loop.stop()
+
+        logger.warning('KILLED')
 
     async def go_to_server_url(self, logger: logging.Logger, page_url: str = '',
                                check_login=True, new_tab=False, log=True, retry_seconds: Optional[int] = 2) -> 'Page':
         browser = await self.connect()
 
-        url = self.server_url + (page_url or '')
+        url = self.get_server_url(page_url)
         page = await browser.go(logger, url, new_tab=new_tab, log=log, retry_seconds=retry_seconds)
 
         if check_login:
             await TravianBotLogin.check_logged_in(self, page)
 
         return page
+
+    def get_server_url(self, page_url: str) -> str:
+        if page_url.startswith('/'):
+            page_url = page_url[1:]
+        return self.server_url + (page_url or '')
 
 
 def build_server_url(url: str) -> str:
@@ -133,32 +158,43 @@ def handle_exceptions(event_loop: asyncio.AbstractEventLoop):
         exception = context.get('exception')
         if exception is None:
             exception = context['message']
-        __handle_exception(exception)
+        __handle_exception(exception, stacktrace=False)
 
     event_loop.set_exception_handler(handle_exception_loop)
 
 
-def __handle_exception(e: Optional[BaseException]):
+def __handle_exception(e: Optional[BaseException], stacktrace=True):
     if e is not None:
         if isinstance(e, (KeyboardInterrupt, CancelledError, asyncio.exceptions.CancelledError)):
             logger.debug(e.__class__.__name__)
         else:
             msg = str(e)
             if msg != 'This event loop is already running':
-                logger.error(f'[{e.__class__.__name__}] {msg}')
+                exc_info = (e or True) if stacktrace else None
+                logger.error(f'[{e.__class__.__name__}] {msg}', exc_info=exc_info)
 
 
 def handle_interrupt(bot: TravianBot):
+    signal_count = 0
+
     async def handle_signal():
+        nonlocal signal_count
+        signal_count += 1
+        logger.debug(f'SIGNAL {signal_count}')
+        if signal_count > 2:
+            bot.kill()
+            exit(1)
         if not bot.is_stopped:
             await bot.stop()
-        else:
-            bot._event_loop.call_soon_threadsafe(bot._event_loop.stop)
 
     def handle_signal_sync(signal_name):
+        def handle_signal_async():
+            asyncio.run_coroutine_threadsafe(handle_signal(), bot._event_loop)
+
         def wrap_handle_signal(_signal, _frame):
             logger.warn(f'Received {signal_name}. Waiting to stop...')
-            bot._event_loop.create_task(handle_signal())
+            # bot._event_loop.create_task(handle_signal())
+            bot._event_loop.run_in_executor(None, handle_signal_async)
 
         return wrap_handle_signal
 
@@ -191,4 +227,5 @@ def start_travian_bot():
     try:
         event_loop.run_until_complete(start())
     except BaseException as e:
+        logger.debug('OUTER __handle_exception')
         __handle_exception(e)
