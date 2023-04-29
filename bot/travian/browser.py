@@ -9,8 +9,10 @@ from settings import console_log
 
 from pyppeteer import launch
 from pyppeteer.page import Page
-from pyppeteer.errors import PyppeteerError, PageError
+from pyppeteer.errors import PyppeteerError
 from pyppeteer.browser import Browser as PyppeteerBrowser
+
+from pyppeteer_stealth import stealth
 
 from typing import Optional, TypeVar, TYPE_CHECKING, cast
 
@@ -27,7 +29,8 @@ PageEvent = TypeVar('PageEvent', str, type(Page.Events))
 
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36'
 
-DEFAULT_BROWSER_ARGS = ['--mute-audio']  # '--no-sandbox', '--disable-site-isolation-trials'
+DEFAULT_BROWSER_ARGS = ['--mute-audio', '--disable-features=IsolateOrigins',
+                        '--disable-site-isolation-trials']  # --no-sandbox
 
 
 class Browser:
@@ -47,6 +50,10 @@ class Browser:
             self.args.append('--start-maximized')  # --start-fullscreen
 
     @property
+    def _event_loop(self) -> asyncio.AbstractEventLoop:
+        return self.__event_loop or asyncio.get_event_loop()
+
+    @property
     def is_connected(self):
         return self.__browser is not None
 
@@ -60,7 +67,7 @@ class Browser:
                 args=self.args,
                 handleSIGINT=False,
                 handleSIGTERM=False,
-                loop=self.__event_loop or asyncio.get_event_loop())
+                loop=self._event_loop)
 
             logger.debug('Connected')
 
@@ -72,15 +79,23 @@ class Browser:
 
         return self.__browser
 
+    async def disconnect(self):
+        if self.__browser:
+            await self.__browser.disconnect()
+
     async def close(self):
         if self.__browser:
             logger.debug('Closing browser...')
 
-            cast(Popen, self.__browser.process).terminate()
-
             await self.__browser.close()
 
+            self.terminate()
+
             logger.debug('Closed')
+
+    def terminate(self):
+        if self.__browser:
+            cast(Popen, self.__browser.process).terminate()
 
     async def go(self, logger: logging.Logger, url: str, new_tab=False, log=False, retry_seconds: Optional[int] = 2) -> Page:
         browser = await self.connect()
@@ -97,6 +112,8 @@ class Browser:
             await page.setUserAgent(USER_AGENT)
 
             await page.setExtraHTTPHeaders(self.headers)
+
+            await stealth(page)
         else:
             page = pages[0]
 
@@ -105,9 +122,17 @@ class Browser:
 
         page.remove_all_listeners(Page.Events.Load)
 
+        def on_page_error(e: Exception):
+            logger.warning(f'{e.__class__.__name__}: {page.url}\n{e}')
+            asyncio.run_coroutine_threadsafe(self.disconnect(), self._event_loop)
+            raise e
+
+        page.on(Page.Events.PageError, on_page_error)
+        page.on(Page.Events.Error, on_page_error)
+
         try:
             await page.goto(url)
-        except PyppeteerError as e:
+        except (PyppeteerError, asyncio.InvalidStateError) as e:
             error_msg = f'[{e.__class__.__name__}] {e}'
             if retry_seconds is not None:
                 if retry_seconds > 0:
@@ -130,12 +155,6 @@ class Browser:
 
         page.on(Page.Events.Load, loaded)
 
-        def page_error(e):
-            logger.warning(f'Page error: {page.url} [{e}]')
-            raise PageError(e)
-
-        page.on(Page.Events.PageError, page_error)
-
         return page
 
     async def click(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, **kwargs):
@@ -144,6 +163,11 @@ class Browser:
         logger.debug(f'Click:\t{clickTitle}')
 
         return await page.click(clickSelector, **kwargs)
+
+    async def click_element(self, logger: logging.Logger, element: 'ElementHandle', clickTitle: str, **kwargs):
+        logger.debug(f'Click:\t{clickTitle}')
+
+        return await element.click(**kwargs)
 
     async def click_go(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, timeout: int = 30000, **kwargs):
         await asyncio.gather(
@@ -157,6 +181,14 @@ class Browser:
         await page.waitForSelector(inputSelector)
 
         await page.type(inputSelector, inputContent, **kwargs)
+
+    async def text_content(self, page: Page, element: 'ElementHandle') -> Optional[str]:
+        text = await page.evaluate('(element) => element.textContent', element)
+        return text.strip() if text else None
+
+    async def attribute(self, page: Page, element: 'ElementHandle', attribute: str) -> Optional[str]:
+        attr = await page.evaluate('(element, attribute) => element.getAttribute(attribute)', element, attribute)
+        return attr.strip() if attr else None
 
     async def wait(self, logger: logging.Logger, page: Page, milliseconds: int, **kwargs):
         logger.debug(f'Waiting for {milliseconds} ms')
@@ -181,9 +213,6 @@ class Browser:
 
             if len(await self.__browser.pages()) > 1:
                 await page.close()
-
-    async def text_content(self, page: Page, element: 'ElementHandle'):
-        return await page.evaluate('(element) => element.textContent', element)
 
     def on(self, event: 'BrowserEvent', handler):
         if self.__browser:
