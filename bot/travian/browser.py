@@ -146,7 +146,7 @@ class Browser:
                 return await self.go(logger, url, new_tab, log, retry_seconds)
             raise e
 
-        logger.debug(f'Loaded:   {page.url}')
+        logger.info(f'Loaded:   {page.url}')
 
         def loaded():
             logger.debug(f'Navigate: {page.url}')
@@ -175,12 +175,12 @@ class Browser:
     async def click(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, **kwargs):
         await page.waitForSelector(clickSelector)
 
-        logger.debug(f'Click:\t{clickTitle}')
+        logger.info(f'Click:\t{clickTitle}')
 
         return await page.click(clickSelector, **kwargs)
 
     async def click_element(self, logger: logging.Logger, element: 'ElementHandle', clickTitle: str, **kwargs):
-        logger.debug(f'Click:\t{clickTitle}')
+        logger.info(f'Click:\t{clickTitle}')
 
         return await element.click(**kwargs)
 
@@ -191,7 +191,7 @@ class Browser:
         )
 
     async def type(self, logger: logging.Logger, page: Page, inputTitle: str, inputSelector: str, inputContent: str, obfuscate: Optional[str] = None, **kwargs):
-        logger.debug(f"Type:\t{inputTitle} -> {f'({obfuscate})' if obfuscate else inputContent}")
+        logger.info(f"Type:\t{inputTitle} -> {f'({obfuscate})' if obfuscate else inputContent}")
 
         await page.waitForSelector(inputSelector)
 
@@ -206,13 +206,13 @@ class Browser:
         return attr.strip() if attr else None
 
     async def wait(self, logger: logging.Logger, page: Page, milliseconds: int, **kwargs):
-        logger.debug(f'Waiting for {milliseconds} ms')
+        if milliseconds > 0:
+            logger.debug(f'Waiting for {milliseconds} ms')
 
-        await page.waitFor(milliseconds, **kwargs)
+            await page.waitFor(milliseconds, **kwargs)
 
     async def screenshot(self, logger: logging.Logger, page: Page, filepath: str, delay_ms: int = 0, **kwargs):
-        if delay_ms:
-            await self.wait(logger, page, delay_ms)
+        await self.wait(logger, page, delay_ms)
 
         logger.info(f'Screenshot ({filepath}): {page.url}')
 

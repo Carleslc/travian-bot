@@ -54,7 +54,6 @@ class TravianBot:
         await TravianBotScreenshot(self, 'start').schedule()
 
         if self.config.farming_list.is_enabled:
-            logger.debug('TravianBotFarmingList is_enabled')
             await TravianBotFarmingList(self).schedule()
 
         # await TravianBotLogout(self).schedule()
@@ -102,7 +101,7 @@ class TravianBot:
         await self.scheduler.clear(cancel_running_tasks=True)
 
         if self.browser:
-            await self.scheduler.run(TravianBotLogout(self, retry_on_error=False))
+            await self.scheduler.run(TravianBotLogout(self, retry_on_page_error=False), reschedule_on_error=False)
 
             if self.browser_is_connected:
                 await self.browser.close()
@@ -190,8 +189,7 @@ def handle_interrupt(bot: TravianBot):
         logger.debug(f'SIGNAL {signal_count}')
         if signal_count > 2:
             bot.kill()
-            exit(1)
-        if not bot.is_stopped:
+        elif not bot.is_stopped:
             await bot.stop()
 
     def handle_signal_sync(signal_name):

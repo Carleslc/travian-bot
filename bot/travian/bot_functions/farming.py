@@ -24,7 +24,12 @@ TARGET_CHECKBOX = 'td.checkbox > input.markSlot'
 
 class TravianBotFarmingList(TravianBotFunction):
 
+    WAIT_SECONDS = 2
+
     async def run(self):
+        if not self.can_farm:
+            raise ValueError('Cannot farm yet')
+
         page = await self.go_to_server_url(logger, FARMING_LIST_URL, new_tab=self.new_tab)
 
         if not self.browser:
@@ -36,7 +41,7 @@ class TravianBotFarmingList(TravianBotFunction):
 
         self.update_data(self.__set_last_farming)
 
-        await self.browser.close_page(logger, page, delay_seconds=5)
+        await self.browser.close_page(logger, page, delay_seconds=TravianBotFarmingList.WAIT_SECONDS)
 
     def __set_last_farming(self, data: Data):
         data.farming_list.last_farming = datetime.now()
@@ -50,19 +55,20 @@ class TravianBotFarmingList(TravianBotFunction):
         return datetime.now() >= self.next_farming_datetime
 
     async def schedule(self):
-        interval_seconds = self.bot.config.farming_list.interval_minutes * 60
+        interval_seconds = self.bot.config.farming_list.interval_seconds - TravianBotFarmingList.WAIT_SECONDS
+
+        interval_options = dict(interval_seconds=interval_seconds, blocking=True, max_retries=3)
 
         if self.can_farm:
-            await self.bot.scheduler.append(self, interval_seconds=interval_seconds, reschedule_on_error=True)
+            await self.bot.scheduler.append(self, **interval_options)
         else:
-            await self.bot.scheduler.schedule(self, self.next_farming_datetime,
-                                              interval_seconds=interval_seconds, reschedule_on_error=True)
+            await self.bot.scheduler.schedule(self, self.next_farming_datetime, **interval_options)
 
     async def __check_farming_lists(self, page: 'Page'):
         logger.debug('Checking farming lists')
 
         if self.browser:
-            await page.waitForSelector(FARMING_LISTS)
+            await page.waitForSelector(FARMING_LISTS, timeout=10000)
 
             for farming_list in (await page.querySelectorAll(FARMING_LISTS)):
                 disable_targets = 0

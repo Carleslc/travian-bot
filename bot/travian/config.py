@@ -131,9 +131,17 @@ class ConfigFunction(DataSection):
         return self.enabled
 
 
-class FarmingList(ConfigFunction):
+class PeriodicFunction(ConfigFunction):
 
     interval_minutes: int = 30
+
+    @property
+    def interval_seconds(self) -> int:
+        return self.interval_minutes * 60
+
+
+class FarmingList(PeriodicFunction):
+    ...
 
 
 class Config(LoadableConfiguration):
