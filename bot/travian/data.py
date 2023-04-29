@@ -1,4 +1,4 @@
-from travian.config import DataSection, ConfigurationSection, load_yml_file, save_yml_file
+from travian.config import DataSection, LoadableConfiguration
 
 from datetime import datetime
 
@@ -10,19 +10,19 @@ class FarmingListData(DataSection):
     last_farming: datetime = datetime.fromtimestamp(0)
 
 
-class Data(ConfigurationSection):
+class Data(LoadableConfiguration):
 
     farming_list: FarmingListData
 
-    def load(self, path=DATA_FILE):
-        try:
-            self.replace(load_yml_file(path))
-        except FileNotFoundError:
-            pass
-        self.farming_list = FarmingListData(self, 'farming-list')
+    def __init__(self, path: str = DATA_FILE):
+        super().__init__(path)
 
-    def save(self, path=DATA_FILE):
-        save_yml_file(self.as_dict(), path)
+    def load(self):
+        try:
+            super().load()
+        except FileNotFoundError:
+            self._loaded = True
+        self.farming_list = FarmingListData(self, 'farming-list')
 
 
 def load_data() -> Data:
