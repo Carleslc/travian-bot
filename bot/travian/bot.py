@@ -15,13 +15,12 @@ from travian.bot_functions.screenshot import TravianBotScreenshot
 from travian.bot_functions.farming import TravianBotFarmingList
 from travian.bot_functions.example import TravianBotExampleFunction
 
+from .browser import Browser
 from pyppeteer.browser import Browser as PyppeteerBrowser
 
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .browser import Browser
-
     from pyppeteer.page import Page
 
 import logging

@@ -118,13 +118,15 @@ class Browser:
 
         page.remove_all_listeners(Page.Events.Load)
 
-        def on_page_error(e: Exception):
-            logger.warning(f'{e.__class__.__name__}: {page.url}\n{e}')
-            asyncio.run_coroutine_threadsafe(self.disconnect(), self._event_loop)
-            raise e
+        def on_page_error(disconnect: bool):
+            def error_handler(e: Exception):
+                logger.warning(f'{e.__class__.__name__}: {page.url}\n{e}')
+                if disconnect:
+                    asyncio.run_coroutine_threadsafe(self.disconnect(), self._event_loop)
+            return error_handler
 
-        page.on(Page.Events.PageError, on_page_error)
-        page.on(Page.Events.Error, on_page_error)
+        page.on(Page.Events.PageError, on_page_error(disconnect=False))
+        page.on(Page.Events.Error, on_page_error(disconnect=True))
 
         try:
             await page.goto(url)
