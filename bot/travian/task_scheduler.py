@@ -52,7 +52,7 @@ class FunctionTask:
 
     @status.setter
     def status(self, new_status: str):
-        if not self.__finish_event.is_set() and new_status != self._status:
+        if new_status != self._status and not self.__finish_event.is_set():
             self._status = new_status
             self._on_new_status()
 

@@ -1,3 +1,5 @@
+import asyncio
+
 from datetime import datetime, timedelta
 
 from travian.bot_functions import TravianBotFunction
@@ -28,7 +30,7 @@ class TravianBotFarmingList(TravianBotFunction):
 
     async def run(self):
         if not self.can_farm:
-            raise ValueError('Cannot farm yet')
+            raise asyncio.InvalidStateError('Cannot farm yet')
 
         page = await self.go_to_server_url(logger, FARMING_LIST_URL, new_tab=self.new_tab)
 
@@ -55,7 +57,7 @@ class TravianBotFarmingList(TravianBotFunction):
         return datetime.now() >= self.next_farming_datetime
 
     async def schedule(self):
-        interval_seconds = self.bot.config.farming_list.interval_seconds - TravianBotFarmingList.WAIT_SECONDS
+        interval_seconds = self.bot.config.farming_list.interval_seconds
 
         interval_options = dict(interval_seconds=interval_seconds, blocking=True, max_retries=3)
 
