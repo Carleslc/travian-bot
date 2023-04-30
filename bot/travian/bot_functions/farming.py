@@ -64,7 +64,8 @@ class TravianBotFarmingList(TravianBotFunction):
         if self.can_farm:
             await self.bot.scheduler.append(self, **interval_options)
         else:
-            await self.bot.scheduler.schedule(self, self.next_farming_datetime, **interval_options)
+            farm_at = self.next_farming_datetime + timedelta(seconds=TravianBotFarmingList.WAIT_SECONDS)
+            await self.bot.scheduler.schedule(self, farm_at, **interval_options)
 
     async def __check_farming_lists(self, page: 'Page'):
         logger.debug('Checking farming lists')
