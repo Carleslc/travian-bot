@@ -2,12 +2,22 @@ from travian.config import DataSection, LoadableConfiguration
 
 from datetime import datetime
 
+from settings import format_date
+
+import logging
+
+logger = logging.getLogger(__name__)
+
 DATA_FILE = '.data.yml'
 
 
 class FarmingListData(DataSection):
 
     last_farming: datetime = datetime.fromtimestamp(0)
+
+    def set_last_farming(self, value: datetime):
+        self.last_farming = value
+        logger.info(f"Set last farming: {format_date(self.last_farming)}")
 
 
 class Data(LoadableConfiguration):

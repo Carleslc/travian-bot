@@ -14,12 +14,13 @@ logger = logging.getLogger(__name__)
 
 class TravianBotScreenshot(TravianBotFunction):
 
-    def __init__(self, bot: 'TravianBot', filename='screenshot'):
+    def __init__(self, bot: 'TravianBot', page_url: str, filename='screenshot'):
         super().__init__(bot)
+        self.page_url = page_url
         self.file = f'{filename}.png'
 
     async def run(self):
-        page = await self.go_to_server_url(logger, check_login=True)
+        page = await self.go_to_server_url(logger, self.page_url)
 
         await self.screenshot(page, delay=2000)
 

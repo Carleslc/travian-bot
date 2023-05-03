@@ -36,3 +36,7 @@ def console_log(logger: logging.Logger, message_type: str, message: str):
 def load_environment():
     from dotenv import load_dotenv
     load_dotenv()
+
+
+def format_date(datetime):
+    return datetime.strftime(DATE_TIME_FORMAT)

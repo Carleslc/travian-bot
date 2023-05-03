@@ -4,8 +4,6 @@ from datetime import datetime, timedelta
 
 from travian.bot_functions import TravianBotFunction
 
-from travian.data import Data
-
 from pyppeteer.page import Page, PageError
 
 import logging
@@ -32,6 +30,8 @@ class TravianBotFarmingList(TravianBotFunction):
         if not self.can_farm:
             raise asyncio.InvalidStateError('Cannot farm yet')
 
+        started = datetime.now()
+
         page = await self.go_to_server_url(logger, FARMING_LIST_URL, new_tab=self.new_tab)
 
         if not self.browser:
@@ -41,16 +41,20 @@ class TravianBotFarmingList(TravianBotFunction):
 
         await self.browser.click(logger, page, 'Raid All', RAID_ALL_LISTS_BUTTON)
 
-        self.update_data(self.__set_last_farming)
+        if page.url != self.bot.get_server_url(FARMING_LIST_URL) or (datetime.now() - started) >= self.__timedelta_interval_minutes:
+            await self.run()
+        else:
+            self.update_data(lambda data: data.farming_list.set_last_farming(datetime.now()))
 
         await self.browser.close_page(logger, page, delay_seconds=TravianBotFarmingList.WAIT_SECONDS)
 
-    def __set_last_farming(self, data: Data):
-        data.farming_list.last_farming = datetime.now()
+    @property
+    def __timedelta_interval_minutes(self):
+        return timedelta(minutes=self.bot.config.farming_list.interval_minutes)
 
     @property
     def next_farming_datetime(self) -> datetime:
-        return self.bot.data.farming_list.last_farming + timedelta(minutes=self.bot.config.farming_list.interval_minutes)
+        return self.bot.data.farming_list.last_farming + self.__timedelta_interval_minutes
 
     @property
     def can_farm(self) -> bool:

@@ -1,3 +1,5 @@
 farming-list:
   enabled: true
   interval-minutes: 30
+
+chrome-path: ''

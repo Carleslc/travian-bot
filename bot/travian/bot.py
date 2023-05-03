@@ -51,7 +51,7 @@ class TravianBot:
 
         # await TravianBotExampleFunction(self).schedule()
 
-        await TravianBotScreenshot(self, 'start').schedule()
+        await TravianBotScreenshot(self, 'dorf1.php', 'start').schedule()
 
         if self.config.farming_list.is_enabled:
             await TravianBotFarmingList(self).schedule()
@@ -66,15 +66,22 @@ class TravianBot:
 
     async def connect(self) -> 'Browser':
         if not self.browser or not self.browser.is_connected:
-            self.browser = await start_browser(headless=False, event_loop=self._event_loop)
+            self.browser = await self.__connect_browser()
 
             logger.info('Started')
 
             def disconnected():
                 logger.info('Disconnected')
 
+                # if not self.is_stopped or self.is_stopping:
+                #     self._event_loop.create_task(self.__connect_browser())
+
             self.browser.on(PyppeteerBrowser.Events.Disconnected, disconnected)
 
+        return self.browser
+
+    async def __connect_browser(self) -> 'Browser':
+        self.browser = await start_browser(headless=False, event_loop=self._event_loop, chrome_path=self.config.chrome_path)
         return self.browser
 
     @property
@@ -136,10 +143,13 @@ class TravianBot:
         browser = await self.connect()
 
         url = self.get_server_url(page_url)
-        page = await get_page_or_go(browser, logger, url, new_tab=new_tab, log=log, retry_seconds=retry_seconds)
+        page: 'Page' = await get_page_or_go(browser, logger, url, new_tab=new_tab, log=log, retry_seconds=retry_seconds)
 
-        if check_login:
-            await TravianBotLogin.check_logged_in(self, page)
+        if check_login and await TravianBotLogin.is_login_page(self.server_url, page):
+            await self.scheduler.run(TravianBotLogin(self, page))
+
+            if page.url != url:
+                await get_page_or_go(browser, logger, url, new_tab=new_tab, log=log, retry_seconds=retry_seconds)
 
         return page
 
@@ -232,5 +242,4 @@ def start_travian_bot():
     try:
         event_loop.run_until_complete(start())
     except BaseException as e:
-        logger.debug('OUTER __handle_exception')
         __handle_exception(e)

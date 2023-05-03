@@ -9,10 +9,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+LOGOUT_URL = 'logout'
+
 
 class TravianBotLogout(TravianBotFunction):
-
-    LOGOUT_URL = 'logout'
 
     def __init__(self, bot: 'TravianBot', retry_on_page_error=True):
         super().__init__(bot)
@@ -21,7 +21,7 @@ class TravianBotLogout(TravianBotFunction):
     async def run(self):
         if self.browser:
             retry_seconds = 2 if self.retry_on_page_error else None
-            logout_page = await self.go_to_server_url(logger, TravianBotLogout.LOGOUT_URL, check_login=False, log=False, retry_seconds=retry_seconds)
+            logout_page = await self.go_to_server_url(logger, LOGOUT_URL, check_login=False, log=False, retry_seconds=retry_seconds)
 
             if self.browser_is_connected and not self.browser.headless:
                 await self.browser.wait(logger, logout_page, 1000)

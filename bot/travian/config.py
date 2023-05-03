@@ -146,6 +146,8 @@ class FarmingList(PeriodicFunction):
 
 class Config(LoadableConfiguration):
 
+    chrome_path: str
+
     farming_list: FarmingList
 
     def __init__(self, path: str = CONFIG_FILE):

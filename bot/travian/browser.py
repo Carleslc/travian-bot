@@ -7,9 +7,9 @@ from subprocess import Popen
 
 from settings import console_log
 
-from pyppeteer import launch
+import pyppeteer
 from pyppeteer.page import Page
-from pyppeteer.errors import PyppeteerError
+from pyppeteer.errors import PyppeteerError, PageError
 from pyppeteer.browser import Browser as PyppeteerBrowser
 
 from pyppeteer_stealth import stealth
@@ -23,51 +23,64 @@ import logging
 
 logger = logging.getLogger(__name__)
 logger_console = logging.getLogger(__name__ + '.console')
+browser_logger = logger
 
 BrowserEvent = TypeVar('BrowserEvent', str, type(PyppeteerBrowser.Events))
 PageEvent = TypeVar('PageEvent', str, type(Page.Events))
 
 USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36'
 
-DEFAULT_BROWSER_ARGS = ['--mute-audio', '--disable-features=IsolateOrigins',
-                        '--disable-site-isolation-trials']  # --no-sandbox
+DEFAULT_BROWSER_ARGS = ['--mute-audio']
+HEADLESS_BROWSER_ARGS = ['--disable-setuid-sandbox']  # '--disable-features=site-per-process'
 
 
 class Browser:
 
     def __init__(self, headless=True, headers={}, width=1920, height=1080,
-                 args: list[str] = DEFAULT_BROWSER_ARGS, event_loop: Optional[asyncio.AbstractEventLoop] = None):
+                 args: list[str] = DEFAULT_BROWSER_ARGS, event_loop: Optional[asyncio.AbstractEventLoop] = None,
+                 chrome_path: Optional[str] = None):
         self.headless = headless
         self.headers = headers
         self.width = width
         self.height = height
         self.args = args
         self.__browser: Optional[PyppeteerBrowser] = None
+        self.__executable_path = chrome_path if chrome_path else None
         self.__event_loop = event_loop
 
-        if not headless:
-            self.args.append(f'--window-size={width},{height}')
+        self.args.append(f'--window-size={width},{height}')
+
+        if headless:
+            self.args.extend(HEADLESS_BROWSER_ARGS)
+        else:
             self.args.append('--start-maximized')  # --start-fullscreen
+
+    @property
+    def is_google_chrome(self) -> bool:
+        return self.__executable_path is not None and 'Google Chrome' in self.__executable_path
+
+    @property
+    def is_connected(self) -> bool:
+        return self.__browser is not None
 
     @property
     def _event_loop(self) -> asyncio.AbstractEventLoop:
         return self.__event_loop or asyncio.get_event_loop()
 
-    @property
-    def is_connected(self):
-        return self.__browser is not None
-
     async def connect(self) -> PyppeteerBrowser:
         if self.__browser is None:
             logger.debug('Connecting...')
 
-            self.__browser = await launch(
-                headless=self.headless,
-                defaultViewport={'width': self.width, 'height': self.height},
-                args=self.args,
-                handleSIGINT=False,
-                handleSIGTERM=False,
-                loop=self._event_loop)
+            if self.__browser is None:
+                self.__browser = await pyppeteer.launch(
+                    headless=self.headless,
+                    defaultViewport={'width': self.width, 'height': self.height},
+                    args=self.args,
+                    handleSIGINT=False,
+                    handleSIGTERM=False,
+                    loop=self._event_loop,
+                    executablePath=self.__executable_path,
+                    dumpio=False)
 
             logger.debug('Connected')
 
@@ -118,15 +131,24 @@ class Browser:
 
         page.remove_all_listeners(Page.Events.Load)
 
-        def on_page_error(disconnect: bool):
-            def error_handler(e: Exception):
-                logger.warning(f'{e.__class__.__name__}: {page.url}\n{e}')
-                if disconnect:
-                    asyncio.run_coroutine_threadsafe(self.disconnect(), self._event_loop)
-            return error_handler
+        page.remove_all_listeners(Page.Events.Error)
+        page.remove_all_listeners(Page.Events.PageError)
 
-        page.on(Page.Events.PageError, on_page_error(disconnect=False))
-        page.on(Page.Events.Error, on_page_error(disconnect=True))
+        def on_browser_error(e: PyppeteerError):
+            browser_logger.warning(f'{e.__class__.__name__}: {page.url}\n{e}')
+            asyncio.run_coroutine_threadsafe(self.disconnect(), self._event_loop)
+
+        def on_page_error(e: PageError):
+            ignore = False
+            error_msg = str(e)
+            if 'TypeError' in error_msg:
+                error_msg = error_msg.split('\n')[0]
+                ignore = 'e.indexOf is not a function' in error_msg
+            if not ignore:
+                browser_logger.warning(f'{e.__class__.__name__}: {page.url}\n{error_msg}')
+
+        page.on(Page.Events.Error, on_browser_error)
+        page.on(Page.Events.PageError, on_page_error)
 
         try:
             await page.goto(url)
@@ -149,7 +171,7 @@ class Browser:
         logger.info(f'Loaded:   {page.url}')
 
         def loaded():
-            logger.debug(f'Navigate: {page.url}')
+            browser_logger.debug(f'Navigate: {page.url}')
 
         page.on(Page.Events.Load, loaded)
 
@@ -173,7 +195,7 @@ class Browser:
         return page
 
     async def click(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, **kwargs):
-        await page.waitForSelector(clickSelector)
+        await page.waitForSelector(clickSelector, timeout=kwargs.get('timeout', 30000))
 
         logger.info(f'Click:\t{clickTitle}')
 
@@ -185,8 +207,10 @@ class Browser:
         return await element.click(**kwargs)
 
     async def click_go(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, timeout: int = 30000, **kwargs):
+        clickTimeout = min(1000, timeout - 1000)
+
         await asyncio.gather(
-            self.click(logger, page, clickTitle, clickSelector, **kwargs),
+            self.click(logger, page, clickTitle, clickSelector, timeout=clickTimeout, **kwargs),
             page.waitForNavigation(timeout=timeout)
         )
 
@@ -194,6 +218,8 @@ class Browser:
         logger.info(f"Type:\t{inputTitle} -> {f'({obfuscate})' if obfuscate else inputContent}")
 
         await page.waitForSelector(inputSelector)
+
+        await page.querySelectorEval(inputSelector, '(inputElement) => inputElement.value = ""')  # clear input
 
         await page.type(inputSelector, inputContent, **kwargs)
 
@@ -220,7 +246,9 @@ class Browser:
         screenshots_dir.mkdir(parents=True, exist_ok=True)
         screenshot_path = os.path.join(screenshots_dir, filepath)
 
-        return await page.screenshot(path=screenshot_path, type='png', fullPage=True, **kwargs)
+        full_page = kwargs.get('fullPage', not self.is_google_chrome)
+
+        return await page.screenshot(path=screenshot_path, type='png', fullPage=full_page, **kwargs)
 
     async def close_page(self, logger: logging.Logger, page: 'Page', delay_seconds: int = 0):
         if self.__browser:
@@ -253,8 +281,9 @@ class Browser:
         Browser.on_page_async(page, Page.Events.Console, log_console_message)
 
 
-async def start_browser(headless=True, width=1440, height=900, args: list[str] = DEFAULT_BROWSER_ARGS, event_loop: Optional[asyncio.AbstractEventLoop] = None) -> Browser:
+async def start_browser(headless=True, width=1440, height=900, args: list[str] = DEFAULT_BROWSER_ARGS,
+                        event_loop: Optional[asyncio.AbstractEventLoop] = None, chrome_path: Optional[str] = None) -> Browser:
     browser = Browser(headless=headless, width=width, height=height,
-                      args=args, event_loop=event_loop)
+                      args=args, event_loop=event_loop, chrome_path=chrome_path)
     await browser.connect()
     return browser

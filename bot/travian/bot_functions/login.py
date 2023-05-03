@@ -20,7 +20,7 @@ LOGIN_URL = 'login.php'
 
 EMAIL_INPUT = '#loginForm > tbody > tr.account > td:nth-child(2) > input'
 PASSWORD_INPUT = '#loginForm > tbody > tr.pass > td:nth-child(2) > input'
-LOGIN_BUTTON = '#loginForm > tbody > tr.loginButtonRow > td:nth-child(2) > button[value=Login]'
+LOGIN_BUTTON = '#loginForm > tbody > tr.loginButtonRow > td:nth-child(2) > button[type=submit]'
 LOGIN_ERROR = '#error'
 
 
@@ -36,11 +36,6 @@ class TravianBotLogin(TravianBotFunction):
         if page.url == server_url or page.url.endswith(LOGIN_URL):
             return (await page.querySelector('body.login')) is not None
         return False
-
-    @staticmethod
-    async def check_logged_in(bot: 'TravianBot', page: 'Page'):
-        if await TravianBotLogin.is_login_page(bot.server_url, page):
-            await bot.scheduler.run(TravianBotLogin(bot, page))
 
     async def run(self):
         if not self.page:

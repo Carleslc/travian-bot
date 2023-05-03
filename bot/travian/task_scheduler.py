@@ -6,7 +6,7 @@ from pyppeteer.errors import PyppeteerError
 
 from travian.bot_functions import TravianBotFunction
 
-from settings import DATE_TIME_FORMAT
+from settings import format_date
 
 from typing import Optional
 from types import SimpleNamespace
@@ -142,8 +142,8 @@ class FunctionTask:
     async def _failed(self, e: BaseException):
         self.exception = e
 
-        if not isinstance(e, (PyppeteerError, asyncio.TimeoutError, asyncio.InvalidStateError)):
-            logger.warning(f'Unknown Error [{e.__class__.__qualname__}]')
+        if not isinstance(e, (ConnectionError, PyppeteerError, asyncio.TimeoutError, asyncio.InvalidStateError)):
+            logger.warning(f'Fatal Error [{e.__class__.__qualname__}]')
             self._finish(TaskStatus.Failed)
             raise e
 
@@ -270,7 +270,7 @@ class PeriodicTask(FunctionTask):
 
             retry_at = datetime.now() + timedelta(seconds=self.interval_seconds)
 
-            logger.debug(f'{self} RETRY AT {retry_at.strftime(DATE_TIME_FORMAT)}')
+            logger.debug(f'{self} RETRY AT {format_date(retry_at)}')
 
             return self._scheduler._schedule(new_task, retry_at, queue=self._scheduler._failed_queue)
 
@@ -280,7 +280,7 @@ class PeriodicTask(FunctionTask):
         s = super().__str__()
 
         if self._next_at and self._status == TaskStatus.Scheduled:
-            s += f' next at {self._next_at.strftime(DATE_TIME_FORMAT)}'
+            s += f' next at {format_date(self._next_at)}'
 
         return s
 
@@ -332,7 +332,7 @@ class ScheduleTask(FunctionTask):
 
         if self._status == TaskStatus.Scheduled and self.remaining_seconds() > 0:
             aprox = '~' if not self.priority else ''
-            s += f' will run at {aprox}{self.at.strftime(DATE_TIME_FORMAT)}'
+            s += f' will run at {aprox}{format_date(self.at)}'
 
         return s
 
