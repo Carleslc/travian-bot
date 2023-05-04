@@ -1,6 +1,6 @@
 import yaml
 
-from typing import Union, Any
+from typing import Optional, Union, Any
 
 import logging
 
@@ -146,7 +146,8 @@ class FarmingList(PeriodicFunction):
 
 class Config(LoadableConfiguration):
 
-    chrome_path: str
+    headless: bool = True
+    chrome_path: Optional[str]
 
     farming_list: FarmingList
 

@@ -12,15 +12,12 @@ services:
     container_name: travian-bot
     restart: unless-stopped
     volumes:
-      - ./bot:/usr/src/travian-bot
+      - ./bot:/usr/src/travian-bot/bot
+      - .env:/usr/src/travian-bot/.env
+      - config.yml:/usr/src/travian-bot/config.yml
+      - .data.yml:/usr/src/travian-bot/.data.yml
+      - ./chrome-settings:/usr/src/travian-bot/.chrome-settings
     networks:
       - web_network
     ports:
       - ${TELEGRAM_WEBHOOK_PORT}:${TELEGRAM_WEBHOOK_PORT}
-    environment:
-      TRAVIAN_SERVER_URL: $TRAVIAN_SERVER_URL
-      TRAVIAN_EMAIL: $TRAVIAN_EMAIL
-      TRAVIAN_PASSWORD: $TRAVIAN_PASSWORD
-      TELEGRAM_TOKEN: $TELEGRAM_TOKEN
-      TELEGRAM_WEBHOOK_URL: $TELEGRAM_WEBHOOK_URL
-      TELEGRAM_WEBHOOK_PORT: $TELEGRAM_WEBHOOK_PORT

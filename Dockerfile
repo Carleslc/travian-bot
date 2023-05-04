@@ -3,9 +3,6 @@ FROM python:3
 
 WORKDIR /usr/src/travian-bot
 
-# Copy environment to workdir
-COPY .env ./
-
 # Copy build dependencies to workdir
 COPY requirements*.txt ./
 
@@ -14,4 +11,4 @@ RUN pip install --upgrade pip
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # Run bot on container start
-ENTRYPOINT [ "python", "-u", "bot.py" ]
+ENTRYPOINT [ "python", "-u", "bot/bot.py" ]

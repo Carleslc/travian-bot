@@ -3,18 +3,18 @@ import os.path
 import asyncio
 
 from pathlib import Path
-from subprocess import Popen
 
 from settings import console_log
 
-import pyppeteer
 from pyppeteer.page import Page
+from pyppeteer.launcher import Launcher
 from pyppeteer.errors import PyppeteerError, PageError
 from pyppeteer.browser import Browser as PyppeteerBrowser
+from pyppeteer.chromium_downloader import current_platform
 
 from pyppeteer_stealth import stealth
 
-from typing import Optional, TypeVar, TYPE_CHECKING, cast
+from typing import Optional, TypeVar, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pyppeteer.page import ConsoleMessage, ElementHandle
@@ -28,32 +28,44 @@ browser_logger = logger
 BrowserEvent = TypeVar('BrowserEvent', str, type(PyppeteerBrowser.Events))
 PageEvent = TypeVar('PageEvent', str, type(Page.Events))
 
-USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36'
+USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36'
 
-DEFAULT_BROWSER_ARGS = ['--mute-audio']
-HEADLESS_BROWSER_ARGS = ['--disable-setuid-sandbox']  # '--disable-features=site-per-process'
+# https://peter.sh/experiments/chromium-command-line-switches/
+# chrome://flags
+# chrome://discards
+# chrome://flags/#heuristic-memory-saver-mode
+DEFAULT_BROWSER_ARGS = ['--enable-automation', '--mute-audio']
+NON_HEADLESS_BROWSER_ARGS = ['--start-maximized']  # --start-fullscreen
+HEADLESS_BROWSER_ARGS = ['--hide-scrollbars', '--disable-setuid-sandbox']
 
 
 class Browser:
 
     def __init__(self, headless=True, headers={}, width=1920, height=1080,
                  args: list[str] = DEFAULT_BROWSER_ARGS, event_loop: Optional[asyncio.AbstractEventLoop] = None,
-                 chrome_path: Optional[str] = None):
+                 chrome_path: Optional[str] = None, user_data_dir: Optional[str] = '.chrome-settings/'):
         self.headless = headless
         self.headers = headers
         self.width = width
         self.height = height
         self.args = args
+        self.__launcher: Optional[Launcher] = None
         self.__browser: Optional[PyppeteerBrowser] = None
         self.__executable_path = chrome_path if chrome_path else None
+        self.__user_data_dir = user_data_dir
         self.__event_loop = event_loop
 
         self.args.append(f'--window-size={width},{height}')
+        self.args.extend(HEADLESS_BROWSER_ARGS if headless else NON_HEADLESS_BROWSER_ARGS)
 
         if headless:
-            self.args.extend(HEADLESS_BROWSER_ARGS)
-        else:
-            self.args.append('--start-maximized')  # --start-fullscreen
+            if self.__executable_path:
+                # chrome://inspect
+                # https://developer.chrome.com/articles/new-headless/
+                self.args.append('--headless=new')
+
+            if current_platform().startswith('win'):
+                self.args.append('--disable-gpu')
 
     @property
     def is_google_chrome(self) -> bool:
@@ -71,16 +83,26 @@ class Browser:
         if self.__browser is None:
             logger.debug('Connecting...')
 
-            if self.__browser is None:
-                self.__browser = await pyppeteer.launch(
-                    headless=self.headless,
+            if self.__launcher is None:
+                if self.__executable_path:
+                    headless_mode = False  # handle manually --headless=new in self.args
+                else:
+                    headless_mode = self.headless
+
+                self.__launcher = Launcher(
+                    headless=headless_mode,
                     defaultViewport={'width': self.width, 'height': self.height},
                     args=self.args,
                     handleSIGINT=False,
                     handleSIGTERM=False,
                     loop=self._event_loop,
                     executablePath=self.__executable_path,
+                    userDataDir=self.__user_data_dir,
+                    devtools=False,  # not headless_mode
                     dumpio=False)
+
+            if self.__browser is None:
+                self.__browser = await self.__launcher.launch()
 
             logger.debug('Connected')
 
@@ -102,13 +124,13 @@ class Browser:
 
             await self.__browser.close()
 
-            self.terminate()
+            await self.terminate()
 
             logger.debug('Closed')
 
-    def terminate(self):
-        if self.__browser:
-            cast(Popen, self.__browser.process).terminate()
+    async def terminate(self):
+        if self.__launcher and not self.__launcher.chromeClosed:
+            await self.__launcher.killChrome()
 
     async def go(self, logger: logging.Logger, url: str, new_tab=False, log=False, retry_seconds: Optional[int] = 2) -> Page:
         browser = await self.connect()
@@ -129,6 +151,10 @@ class Browser:
         if log:
             Browser.attach_console(page)
 
+        session = await page.target.createCDPSession()
+        await session.send('Page.enable')
+        await session.send('Page.setWebLifecycleState', {'state': 'active'})
+
         page.remove_all_listeners(Page.Events.Load)
 
         page.remove_all_listeners(Page.Events.Error)
@@ -145,7 +171,7 @@ class Browser:
                 error_msg = error_msg.split('\n')[0]
                 ignore = 'e.indexOf is not a function' in error_msg
             if not ignore:
-                browser_logger.warning(f'{e.__class__.__name__}: {page.url}\n{error_msg}')
+                browser_logger.warning(f'{e.__class__.__name__}: {page.url}\n{e}')
 
         page.on(Page.Events.Error, on_browser_error)
         page.on(Page.Events.PageError, on_page_error)
@@ -197,11 +223,15 @@ class Browser:
     async def click(self, logger: logging.Logger, page: Page, clickTitle: str, clickSelector: str, **kwargs):
         await page.waitForSelector(clickSelector, timeout=kwargs.get('timeout', 30000))
 
+        await page.bringToFront()
+
         logger.info(f'Click:\t{clickTitle}')
 
         return await page.click(clickSelector, **kwargs)
 
-    async def click_element(self, logger: logging.Logger, element: 'ElementHandle', clickTitle: str, **kwargs):
+    async def click_element(self, logger: logging.Logger, page: Page, element: 'ElementHandle', clickTitle: str, **kwargs):
+        await page.bringToFront()
+
         logger.info(f'Click:\t{clickTitle}')
 
         return await element.click(**kwargs)
@@ -218,6 +248,8 @@ class Browser:
         logger.info(f"Type:\t{inputTitle} -> {f'({obfuscate})' if obfuscate else inputContent}")
 
         await page.waitForSelector(inputSelector)
+
+        await page.bringToFront()
 
         await page.querySelectorEval(inputSelector, '(inputElement) => inputElement.value = ""')  # clear input
 

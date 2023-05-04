@@ -42,11 +42,17 @@ class TravianBotFarmingList(TravianBotFunction):
         await self.browser.click(logger, page, 'Raid All', RAID_ALL_LISTS_BUTTON)
 
         if page.url != self.bot.get_server_url(FARMING_LIST_URL) or (datetime.now() - started) >= self.__timedelta_interval_minutes:
+            await self.__close_page(page)
+
             await self.run()
         else:
             self.update_data(lambda data: data.farming_list.set_last_farming(datetime.now()))
 
-        await self.browser.close_page(logger, page, delay_seconds=TravianBotFarmingList.WAIT_SECONDS)
+            await self.__close_page(page)
+
+    async def __close_page(self, page: 'Page'):
+        if self.browser:
+            await self.browser.close_page(logger, page, delay_seconds=TravianBotFarmingList.WAIT_SECONDS)
 
     @property
     def __timedelta_interval_minutes(self):
@@ -99,7 +105,7 @@ class TravianBotFarmingList(TravianBotFunction):
 
                         if target_checkbox:
                             target_village_str = f'Mark as inactive: {target_village_str}'
-                            await self.browser.click_element(logger, target_checkbox, target_village_str)
+                            await self.browser.click_element(logger, page, target_checkbox, target_village_str)
                             disable_targets += 1
 
                 if disable_targets:
@@ -108,6 +114,6 @@ class TravianBotFarmingList(TravianBotFunction):
                     disable_all_checked_button = await farming_list.querySelector(FARMING_TOGGLE_CHECKED_BUTTON)
 
                     if disable_all_checked_button:
-                        await self.browser.click_element(logger, disable_all_checked_button, f'Disable {disable_targets} farming targets (not green attack)')
+                        await self.browser.click_element(logger, page, disable_all_checked_button, f'Disable {disable_targets} farming targets (not green attack)')
                     else:
                         raise PageError(f'Cannot disable {disable_targets} farming targets (not green attack)')

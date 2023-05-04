@@ -81,7 +81,11 @@ class TravianBot:
         return self.browser
 
     async def __connect_browser(self) -> 'Browser':
-        self.browser = await start_browser(headless=False, event_loop=self._event_loop, chrome_path=self.config.chrome_path)
+        self.browser = await start_browser(
+            headless=self.config.headless,
+            event_loop=self._event_loop,
+            chrome_path=self.config.chrome_path)
+
         return self.browser
 
     @property
@@ -117,18 +121,16 @@ class TravianBot:
 
         logger.info('Stopped')
 
-    def kill(self):
-        logger.warning('KILL')
-
+    async def kill(self):
         if self.browser:
-            self.browser.terminate()
+            await self.browser.terminate()
             self.browser = None
 
         self.data.save()
 
         self._event_loop.stop()
 
-        logger.warning('KILLED')
+        logger.warning('KILL')
 
     async def go_to_server_url(self, logger: logging.Logger, page_url: str = '',
                                check_login=True, new_tab=False, log=True, retry_seconds: Optional[int] = 2) -> 'Page':
@@ -198,7 +200,7 @@ def handle_interrupt(bot: TravianBot):
         signal_count += 1
         logger.debug(f'SIGNAL {signal_count}')
         if signal_count > 2:
-            bot.kill()
+            await bot.kill()
         elif not bot.is_stopped:
             await bot.stop()
 

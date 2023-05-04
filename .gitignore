@@ -11,6 +11,7 @@ __pycache__
 # Configuration
 config.yml
 .data.yml
+.chrome-settings/
 
 # Screenshots
 screenshots/

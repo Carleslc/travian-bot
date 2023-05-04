@@ -2,4 +2,5 @@ farming-list:
   enabled: true
   interval-minutes: 30
 
+headless: true
 chrome-path: ''
