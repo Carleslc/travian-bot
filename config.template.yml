@@ -1,6 +1,11 @@
 farming-list:
   enabled: true
+  interval-minutes: 60
+
+adventures:
+  enabled: true
   interval-minutes: 30
+  min-health: 20
 
 headless: true
 chrome-path: ''

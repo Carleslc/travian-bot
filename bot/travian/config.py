@@ -144,12 +144,18 @@ class FarmingList(PeriodicFunction):
     ...
 
 
+class Adventures(PeriodicFunction):
+
+    min_health: int = 20
+
+
 class Config(LoadableConfiguration):
 
     headless: bool = True
     chrome_path: Optional[str]
 
     farming_list: FarmingList
+    adventures: Adventures
 
     def __init__(self, path: str = CONFIG_FILE):
         super().__init__(path)
@@ -157,6 +163,7 @@ class Config(LoadableConfiguration):
     def load(self):
         super().load()
         self.farming_list = FarmingList(self, 'farming-list')
+        self.adventures = Adventures(self, 'adventures')
 
 
 def load_config() -> Config:

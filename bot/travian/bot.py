@@ -13,6 +13,7 @@ from travian.bot_functions.login import TravianBotLogin
 from travian.bot_functions.logout import TravianBotLogout
 from travian.bot_functions.screenshot import TravianBotScreenshot
 from travian.bot_functions.farming import TravianBotFarmingList
+from travian.bot_functions.adventures import TravianHeroAdventures
 from travian.bot_functions.example import TravianBotExampleFunction
 
 from .browser import Browser
@@ -55,6 +56,9 @@ class TravianBot:
 
         if self.config.farming_list.is_enabled:
             await TravianBotFarmingList(self).schedule()
+
+        if self.config.adventures.is_enabled:
+            await TravianHeroAdventures(self).schedule()
 
         # await TravianBotLogout(self).schedule()
 

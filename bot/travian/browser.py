@@ -14,7 +14,7 @@ from pyppeteer.chromium_downloader import current_platform
 
 from pyppeteer_stealth import stealth
 
-from typing import Optional, TypeVar, TYPE_CHECKING
+from typing import Optional, Union, TypeVar, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pyppeteer.page import ConsoleMessage, ElementHandle
@@ -255,17 +255,36 @@ class Browser:
 
         await page.type(inputSelector, inputContent, **kwargs)
 
-    async def text_content(self, page: Page, element: 'ElementHandle') -> Optional[str]:
-        text = await page.evaluate('(element) => element.textContent', element)
-        return text.strip() if text else None
+    async def text_content(self, page: Page, element: Union['ElementHandle', str, None], timeout: int = 10000) -> Optional[str]:
+        if isinstance(element, str):
+            await page.waitForSelector(element, timeout=timeout)
+            element = await page.querySelector(element)
+        if element:
+            text = await page.evaluate('(element) => element.textContent', element)
+            if text:
+                return text.strip()
+        return None
 
-    async def attribute(self, page: Page, element: 'ElementHandle', attribute: str) -> Optional[str]:
-        attr = await page.evaluate('(element, attribute) => element.getAttribute(attribute)', element, attribute)
-        return attr.strip() if attr else None
+    async def attribute(self, page: Page, element: Union['ElementHandle', str, None], attribute: str, timeout: int = 10000) -> Optional[str]:
+        if isinstance(element, str):
+            await page.waitForSelector(element, timeout=timeout)
+            element = await page.querySelector(element)
+        if element:
+            attr = await page.evaluate('(element, attribute) => element.getAttribute(attribute)', element, attribute)
+            if attr:
+                return attr.strip()
+        return None
 
-    async def wait(self, logger: logging.Logger, page: Page, milliseconds: int, **kwargs):
+    async def bounding_box(self, page: Page, element: 'ElementHandle') -> dict:
+        return await page.evaluate("""(element) => {
+                const { top, left, width, height } = element.getBoundingClientRect();
+                return { top, left, width, height };
+            }""", element)
+
+    async def wait(self, logger: Optional[logging.Logger], page: Page, milliseconds: int, **kwargs):
         if milliseconds > 0:
-            logger.debug(f'Waiting for {milliseconds} ms')
+            if logger:
+                logger.debug(f'Waiting for {milliseconds} ms')
 
             await page.waitFor(milliseconds, **kwargs)
 
@@ -282,7 +301,7 @@ class Browser:
 
         return await page.screenshot(path=screenshot_path, type='png', fullPage=full_page, **kwargs)
 
-    async def close_page(self, logger: logging.Logger, page: 'Page', delay_seconds: int = 0):
+    async def close_page(self, logger: Optional[logging.Logger], page: 'Page', delay_seconds: int = 0):
         if self.__browser:
             await self.wait(logger, page, delay_seconds * 1000)
 
