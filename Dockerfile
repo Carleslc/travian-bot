@@ -1,5 +1,5 @@
-# Latest stable version of Python 3
-FROM python:3
+# Python 3.10 (same as .python-version)
+FROM python:3.10
 
 WORKDIR /usr/src/travian-bot
 
